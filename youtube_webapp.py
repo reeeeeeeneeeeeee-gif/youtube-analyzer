@@ -61,10 +61,11 @@ def process_video_items(items, category_map):
 # --- API 호출 함수 1: 키워드 검색 ---
 def get_youtube_data(youtube, category_map, query, max_results=50):
     try:
-        # ▼▼▼ [수정된 부분] regionCode='KR'을 추가하여 한국 영상으로 제한합니다. ▼▼▼
+        # ▼▼▼ [수정된 부분] relevanceLanguage='ko'를 추가하여 한국어 영상 우선 검색 ▼▼▼
         search_request = youtube.search().list(
             q=query, part='id', type='video', 
-            maxResults=max_results, order='relevance', regionCode='KR'
+            maxResults=max_results, order='relevance', 
+            regionCode='KR', relevanceLanguage='ko'
         )
         search_response = search_request.execute()
         video_ids = [item['id']['videoId'] for item in search_response.get('items', [])]
