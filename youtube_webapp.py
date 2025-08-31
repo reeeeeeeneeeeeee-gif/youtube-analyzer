@@ -61,7 +61,11 @@ def process_video_items(items, category_map):
 # --- API 호출 함수 1: 키워드 검색 ---
 def get_youtube_data(youtube, category_map, query, max_results=50):
     try:
-        search_request = youtube.search().list(q=query, part='id', type='video', maxResults=max_results, order='relevance')
+        # ▼▼▼ [수정된 부분] regionCode='KR'을 추가하여 한국 영상으로 제한합니다. ▼▼▼
+        search_request = youtube.search().list(
+            q=query, part='id', type='video', 
+            maxResults=max_results, order='relevance', regionCode='KR'
+        )
         search_response = search_request.execute()
         video_ids = [item['id']['videoId'] for item in search_response.get('items', [])]
         if not video_ids: return None
@@ -80,31 +84,24 @@ def get_comprehensive_popular_videos(_youtube, category_map):
         excluded_categories = ['음악', '게임']
         excluded_ids = [cat_id for cat_id, cat_name in category_map.items() if cat_name in excluded_categories]
         all_video_ids = set()
-        
-        # ▼▼▼ [수정된 부분] 검색 기간을 설정값(90일)으로 다시 적용합니다. ▼▼▼
         start_date = (datetime.now(timezone.utc) - timedelta(days=SEARCH_PERIOD_DAYS)).strftime('%Y-%m-%dT%H:%M:%SZ')
-
         for cat_id, cat_name in category_map.items():
             if cat_id in excluded_ids: continue
-            
             search_request = _youtube.search().list(
                 part='id', type='video', videoCategoryId=cat_id,
-                maxResults=15, order='viewCount', regionCode='KR', # 카테고리별 수집량을 15개로 늘림
+                maxResults=15, order='viewCount', regionCode='KR',
                 publishedAfter=start_date
             )
             search_response = search_request.execute()
             for item in search_response.get('items', []):
                 all_video_ids.add(item['id']['videoId'])
-
         if not all_video_ids: return None
-        
         video_ids_list = list(all_video_ids)
         video_request = _youtube.videos().list(
             part="snippet,statistics,contentDetails",
             id=','.join(video_ids_list)
         )
         video_response = video_request.execute()
-        
         df = process_video_items(video_response.get('items', []), category_map)
         return df.sort_values(by='조회수', ascending=False).head(100)
     except Exception as e:
@@ -116,13 +113,9 @@ st.set_page_config(page_title="📈 유튜브 영상 분석기", page_icon="📈
 st.title("📈 유튜브 인기 영상 분석기"); st.markdown("---")
 try: api_key = st.secrets["YOUTUBE_API_KEY"]
 except KeyError: st.error("🔑 Streamlit Secrets에 API 키가 설정되지 않았습니다. 앱 설정(Manage app)에서 추가해주세요."); st.stop()
-
-youtube = build('youtube', 'v3', developerKey=api_key)
-category_map = get_video_categories(youtube)
-
+youtube = build('youtube', 'v3', developerKey=api_key); category_map = get_video_categories(youtube)
 if 'comprehensive_data' not in st.session_state:
     st.session_state.comprehensive_data = get_comprehensive_popular_videos(youtube, category_map)
-
 st.header("1. 키워드 검색 분석")
 with st.form(key="search_form"):
     search_query = st.text_input("검색어 입력창", placeholder="🔍 분석하고 싶은 검색어를 입력하세요.", label_visibility="collapsed")
@@ -139,7 +132,6 @@ if submit_button and search_query:
         st.dataframe(df_results, height=800, column_config={"조회수": st.column_config.NumberColumn(format="%d"), "시간당 조회수": st.column_config.NumberColumn(format="%d"),"좋아요 수": st.column_config.NumberColumn(format="%d"), "댓글 수": st.column_config.NumberColumn(format="%d"),"반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"), "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")})
     else: st.warning(f"'{search_query}'에 대한 검색 결과가 없습니다.")
 st.markdown("---");
-# ▼▼▼ [수정된 부분] 헤더의 기간 설명을 동적으로 변경했습니다. ▼▼▼
 st.header(f"2. 카테고리별 종합 인기 동영상 (최근 {SEARCH_PERIOD_DAYS}일, TOP 100)")
 df_popular = st.session_state.comprehensive_data
 if df_popular is not None:
