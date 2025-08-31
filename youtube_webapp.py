@@ -55,7 +55,7 @@ def process_video_items(items, category_map):
     ]
     return df[column_order]
 
-# --- API 호출 함수 1: 키워드 검색 ---
+# --- API 호출 함수들 ---
 def get_youtube_data(youtube, category_map, query, max_results=50):
     try:
         search_request = youtube.search().list(q=query, part='id', type='video', maxResults=max_results, order='relevance')
@@ -70,48 +70,23 @@ def get_youtube_data(youtube, category_map, query, max_results=50):
         st.error(f"검색 중 오류: {e}")
         return None
 
-# --- [수정된 기능] API 호출 함수 2: 카테고리별 조회수 TOP 영상 종합 ---
 @st.cache_data
-def get_comprehensive_popular_videos(_youtube, category_map):
+def get_trending_videos(_youtube, category_map):
     try:
-        excluded_categories = ['음악', '게임']
-        excluded_ids = [cat_id for cat_id, cat_name in category_map.items() if cat_name in excluded_categories]
-        
-        all_video_ids = set()
-        start_date = (datetime.now(timezone.utc) - timedelta(days=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-        # 각 카테고리별로 상위 영상 ID 수집
-        for cat_id, cat_name in category_map.items():
-            if cat_id in excluded_ids:
-                continue
-            
-            # 카테고리별로 10개씩 검색 (13개 카테고리 * 10 = 130개 영상)
-            search_request = _youtube.search().list(
-                part='id', type='video', videoCategoryId=cat_id,
-                maxResults=10, order='viewCount', regionCode='KR',
-                publishedAfter=start_date
+        all_items = []
+        next_page_token = None
+        for _ in range(4): 
+            request = _youtube.videos().list(
+                part="snippet,statistics,contentDetails", chart='mostPopular',
+                regionCode='KR', maxResults=50, pageToken=next_page_token
             )
-            search_response = search_request.execute()
-            for item in search_response.get('items', []):
-                all_video_ids.add(item['id']['videoId'])
-
-        if not all_video_ids:
-            return None
-
-        # 수집된 모든 영상 ID의 상세 정보 한 번에 가져오기
-        video_ids_list = list(all_video_ids)
-        video_request = _youtube.videos().list(
-            part="snippet,statistics,contentDetails",
-            id=','.join(video_ids_list)
-        )
-        video_response = video_request.execute()
-        
-        # 데이터프레임으로 변환 후 최종 정렬 및 100개 선택
-        df = process_video_items(video_response.get('items', []), category_map)
-        return df.sort_values(by='조회수', ascending=False).head(100)
-
+            response = request.execute()
+            all_items.extend(response.get('items', []))
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token: break
+        return process_video_items(all_items, category_map)
     except Exception as e:
-        st.error(f"카테고리별 인기 동영상 로딩 중 오류: {e}")
+        st.error(f"인기 동영상 로딩 중 오류: {e}")
         return None
 
 # --- Streamlit 웹 UI 구성 ---
@@ -128,8 +103,8 @@ except KeyError:
 youtube = build('youtube', 'v3', developerKey=api_key)
 category_map = get_video_categories(youtube)
 
-if 'comprehensive_data' not in st.session_state:
-    st.session_state.comprehensive_data = get_comprehensive_popular_videos(youtube, category_map)
+if 'trending_data' not in st.session_state:
+    st.session_state.trending_data = get_trending_videos(youtube, category_map)
 
 st.header("1. 키워드 검색 분석")
 with st.form(key="search_form"):
@@ -162,30 +137,35 @@ if submit_button and search_query:
             )
             
         st.dataframe(df_results, height=800, column_config={
-            "조회수": st.column_config.NumberColumn(format="%d"), "시간당 조회수": st.column_config.NumberColumn(format="%d"),
-            "좋아요 수": st.column_config.NumberColumn(format="%d"), "댓글 수": st.column_config.NumberColumn(format="%d"),
-            "반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"), "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")
+            "조회수": st.column_config.NumberColumn(format="%d"),
+            "시간당 조회수": st.column_config.NumberColumn(format="%d"),
+            "좋아요 수": st.column_config.NumberColumn(format="%d"),
+            "댓글 수": st.column_config.NumberColumn(format="%d"),
+            "반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"),
+            "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")
         })
     else:
         st.warning(f"'{search_query}'에 대한 검색 결과가 없습니다.")
 
 st.markdown("---")
-# ▼▼▼ [수정된 부분] 헤더와 로직을 새로운 기능에 맞게 변경 ▼▼▼
-st.header("2. 카테고리별 종합 인기 동영상 (최근 10일, TOP 100)")
-df_popular = st.session_state.comprehensive_data
-if df_popular is not None:
-    all_categories = sorted(df_popular['카테고리'].unique())
+st.header("2. 현재 대한민국 인기 동영상")
+df_trending = st.session_state.trending_data
+if df_trending is not None:
+    all_categories = sorted(df_trending['카테고리'].unique())
     all_categories.insert(0, "전체")
     
     selected_category = st.selectbox('🗂️ 표시할 카테고리를 선택하세요:', all_categories)
     
     if selected_category == "전체":
-        display_df = df_popular
+        display_df = df_trending
     else:
-        display_df = df_popular[df_popular['카테고리'] == selected_category]
+        display_df = df_trending[df_trending['카테고리'] == selected_category]
         
     st.dataframe(display_df, height=800, column_config={
-        "조회수": st.column_config.NumberColumn(format="%d"), "시간당 조회수": st.column_config.NumberColumn(format="%d"),
-        "좋아요 수": st.column_config.NumberColumn(format="%d"), "댓글 수": st.column_config.NumberColumn(format="%d"),
-        "반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"), "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")
+        "조회수": st.column_config.NumberColumn(format="%d"),
+        "시간당 조회수": st.column_config.NumberColumn(format="%d"),
+        "좋아요 수": st.column_config.NumberColumn(format="%d"),
+        "댓글 수": st.column_config.NumberColumn(format="%d"),
+        "반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"),
+        "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")
     })
