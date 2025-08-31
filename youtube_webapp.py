@@ -61,7 +61,11 @@ def process_video_items(items, category_map):
 # --- API 호출 함수 1: 키워드 검색 ---
 def get_youtube_data(youtube, category_map, query, max_results=50):
     try:
-        search_request = youtube.search().list(q=query, part='id', type='video', maxResults=max_results, order='relevance', regionCode='KR', relevanceLanguage='ko')
+        search_request = youtube.search().list(
+            q=query, part='id', type='video', 
+            maxResults=max_results, order='relevance', 
+            regionCode='KR', relevanceLanguage='ko'
+        )
         search_response = search_request.execute()
         video_ids = [item['id']['videoId'] for item in search_response.get('items', [])]
         if not video_ids: return None
@@ -85,11 +89,11 @@ def get_comprehensive_popular_videos(_youtube, category_map):
         for cat_id, cat_name in category_map.items():
             if cat_id in excluded_ids: continue
             
-            # ▼▼▼ [수정된 부분] 카테고리별 수집량을 25개로 늘립니다. ▼▼▼
+            # ▼▼▼ [수정된 부분] relevanceLanguage='ko'를 추가하여 한국어 영상 우선 검색 ▼▼▼
             search_request = _youtube.search().list(
                 part='id', type='video', videoCategoryId=cat_id,
                 maxResults=25, order='viewCount', regionCode='KR',
-                publishedAfter=start_date
+                relevanceLanguage='ko', publishedAfter=start_date
             )
             search_response = search_request.execute()
             for item in search_response.get('items', []):
@@ -106,7 +110,6 @@ def get_comprehensive_popular_videos(_youtube, category_map):
         
         df = process_video_items(video_response.get('items', []), category_map)
         df.dropna(subset=['조회수'], inplace=True)
-        # ▼▼▼ [수정된 부분] 최종 목록을 200개로 늘립니다. ▼▼▼
         return df.sort_values(by='조회수', ascending=False).head(200)
     except Exception as e:
         st.error(f"카테고리별 인기 동영상 로딩 중 오류: {e}")
@@ -136,7 +139,6 @@ if submit_button and search_query:
         st.dataframe(df_results, height=800, column_config={"조회수": st.column_config.NumberColumn(format="%d"), "시간당 조회수": st.column_config.NumberColumn(format="%d"),"좋아요 수": st.column_config.NumberColumn(format="%d"), "댓글 수": st.column_config.NumberColumn(format="%d"),"반응률 (%)": st.column_config.NumberColumn(format="%.2f%%"), "URL": st.column_config.LinkColumn("영상 링크", display_text="바로가기 ↗")})
     else: st.warning(f"'{search_query}'에 대한 검색 결과가 없습니다.")
 st.markdown("---");
-# ▼▼▼ [수정된 부분] 헤더의 설명을 TOP 200으로 변경했습니다. ▼▼▼
 st.header(f"2. 카테고리별 종합 인기 동영상 (최근 {SEARCH_PERIOD_DAYS}일, TOP 200)")
 df_popular = st.session_state.comprehensive_data
 if df_popular is not None:
